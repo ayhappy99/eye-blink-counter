@@ -1,0 +1,1891 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>눈 깜빡임 카운터</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
+
+  :root {
+    --bg:       #0a0a0f;
+    --surface:  #12121a;
+    --border:   #1e1e2e;
+    --accent:   #00e5ff;
+    --accent2:  #7c3aed;
+    --warn:     #ff4757;
+    --ok:       #2ecc71;
+    --orange:   #f39c12;
+    --text:     #e0e0f0;
+    --text-dim: #6b6b8a;
+    --mono: 'Space Mono', monospace;
+    --sans: 'Noto Sans KR', sans-serif;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content:'';
+    position:fixed; inset:0;
+    background-image:
+      linear-gradient(rgba(0,229,255,0.025) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(0,229,255,0.025) 1px,transparent 1px);
+    background-size:40px 40px;
+    pointer-events:none; z-index:0;
+  }
+
+  /* ═══ 페이지 전환 ═══ */
+  .page {
+    position: fixed; inset: 0;
+    overflow-y: auto;
+    display: flex; flex-direction: column; align-items: center;
+    z-index: 1;
+    transition: opacity 0.5s ease, transform 0.5s ease;
+  }
+
+  .page.hidden       { opacity:0; pointer-events:none; transform:translateX(-40px); }
+  .page.hidden-right { opacity:0; pointer-events:none; transform:translateX(40px); }
+
+  /* ═══ 공통 ═══ */
+  .container { width:100%; max-width:900px; padding:24px 20px 48px; position:relative; }
+
+  header { text-align:center; margin-bottom:32px; }
+
+  .title-tag {
+    font-family:var(--mono); font-size:11px;
+    color:var(--accent); letter-spacing:0.3em;
+    text-transform:uppercase; margin-bottom:10px; opacity:0.8;
+  }
+
+  h1 {
+    font-family:var(--mono); font-size:clamp(20px,5vw,34px);
+    font-weight:700; letter-spacing:-0.02em;
+  }
+
+  h1 span { color:var(--accent); }
+
+  .subtitle { font-size:13px; color:var(--text-dim); margin-top:8px; font-weight:300; }
+
+  /* ═══ PAGE 1 레이아웃 ═══ */
+  .main-grid {
+    display:grid; grid-template-columns:1fr 280px;
+    gap:20px; align-items:start;
+  }
+
+  @media (max-width:700px) { .main-grid { grid-template-columns:1fr; } }
+
+  /* 카메라 */
+  .camera-wrap {
+    position:relative; border-radius:12px; overflow:hidden;
+    background:var(--surface); border:1px solid var(--border); aspect-ratio:4/3;
+  }
+
+  #videoEl  { width:100%; height:100%; object-fit:cover; display:block; transform:scaleX(-1); }
+  #canvasEl { position:absolute; inset:0; width:100%; height:100%; transform:scaleX(-1); }
+
+  .camera-wrap::after {
+    content:''; position:absolute; inset:0;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.07) 2px,rgba(0,0,0,0.07) 4px);
+    pointer-events:none; border-radius:12px;
+  }
+
+  .camera-status {
+    position:absolute; top:12px; left:12px;
+    display:flex; align-items:center; gap:6px;
+    background:rgba(0,0,0,0.65); backdrop-filter:blur(8px);
+    padding:5px 10px; border-radius:20px;
+    font-family:var(--mono); font-size:11px; z-index:10;
+  }
+
+  /* [2번] 거리 경고 배너 */
+  .distance-warn {
+    position:absolute; top:44px; left:12px; right:12px;
+    background:rgba(243,156,18,0.88); backdrop-filter:blur(6px);
+    border-radius:8px; padding:6px 12px;
+    font-family:var(--mono); font-size:11px; color:#000;
+    z-index:10; display:none; text-align:center;
+    animation: fadeWarn 0.3s ease;
+  }
+
+  .distance-warn.show { display:block; }
+
+  @keyframes fadeWarn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
+
+  .status-dot { width:7px; height:7px; border-radius:50%; background:var(--text-dim); flex-shrink:0; }
+  .status-dot.active { background:var(--ok);     box-shadow:0 0 8px var(--ok);     animation:pulse 1.5s ease-in-out infinite; }
+  .status-dot.warn   { background:var(--warn);   box-shadow:0 0 8px var(--warn); }
+  .status-dot.calib  { background:var(--orange); box-shadow:0 0 8px var(--orange); animation:pulse 0.6s ease-in-out infinite; }
+  .status-dot.far    { background:var(--orange); box-shadow:0 0 8px var(--orange); }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+  .ear-bar-wrap {
+    position:absolute; bottom:12px; left:12px; right:12px; z-index:10;
+    background:rgba(0,0,0,0.65); backdrop-filter:blur(8px);
+    border-radius:8px; padding:8px 12px;
+  }
+
+  .ear-label {
+    display:flex; justify-content:space-between;
+    font-family:var(--mono); font-size:10px; color:var(--text-dim); margin-bottom:5px;
+  }
+
+  .ear-track { height:4px; background:var(--border); border-radius:2px; overflow:hidden; position:relative; }
+
+  .ear-fill {
+    height:100%; width:0%;
+    background:linear-gradient(90deg,var(--accent2),var(--accent));
+    border-radius:2px; transition:width 0.08s linear;
+  }
+
+  .ear-fill.blink { background:var(--warn); }
+
+  .ear-thresh-marker {
+    position:absolute; top:-2px; width:2px; height:8px;
+    background:rgba(255,255,255,0.5); border-radius:1px;
+  }
+
+  /* 캘리브레이션 오버레이 */
+  #calibOverlay {
+    display:none; position:absolute; inset:0;
+    background:rgba(0,0,0,0.78); backdrop-filter:blur(4px);
+    flex-direction:column; align-items:center; justify-content:center; gap:16px;
+    z-index:15; border-radius:12px;
+  }
+
+  #calibOverlay.show { display:flex; }
+
+  .calib-title { font-family:var(--mono); font-size:15px; letter-spacing:0.05em; }
+  .calib-sub   { font-size:12px; color:var(--text-dim); }
+
+  .calib-ring-wrap { position:relative; width:80px; height:80px; }
+  .calib-ring-bg   { fill:none; stroke:var(--border); stroke-width:4; }
+  .calib-ring-prog {
+    fill:none; stroke:var(--orange); stroke-width:4; stroke-linecap:round;
+    stroke-dasharray:226; stroke-dashoffset:226;
+    transform:rotate(-90deg); transform-origin:center; transition:stroke-dashoffset 0.1s linear;
+  }
+
+  .calib-count {
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:22px; font-weight:700; color:var(--orange);
+  }
+
+  /* 로딩 오버레이 */
+  #loadingOverlay {
+    position:absolute; inset:0; background:var(--surface);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
+    z-index:20; border-radius:12px;
+  }
+
+  .loader-ring {
+    width:44px; height:44px; border:2px solid var(--border); border-top-color:var(--accent);
+    border-radius:50%; animation:spin 0.9s linear infinite;
+  }
+
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .loader-text { font-family:var(--mono); font-size:12px; color:var(--text-dim); text-align:center; line-height:1.7; }
+
+  /* 사이드 패널 */
+  .side-panel { display:flex; flex-direction:column; gap:14px; }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; }
+
+  .card-label {
+    font-family:var(--mono); font-size:10px; letter-spacing:0.25em;
+    color:var(--text-dim); text-transform:uppercase; margin-bottom:10px;
+  }
+
+  /* ═══ [1번] 시간 선택 ═══ */
+  .time-opts {
+    display:grid; grid-template-columns:repeat(5,1fr); gap:6px;
+  }
+
+  .time-opt {
+    padding:7px 4px; border:1px solid var(--border);
+    background:transparent; color:var(--text-dim);
+    border-radius:6px; font-family:var(--mono); font-size:11px;
+    cursor:pointer; transition:all 0.15s ease; text-align:center;
+  }
+
+  .time-opt:hover:not(:disabled):not(.active) {
+    border-color:var(--text-dim); color:var(--text);
+  }
+
+  .time-opt.active {
+    background:rgba(0,229,255,0.1); border-color:var(--accent);
+    color:var(--accent); font-weight:700;
+  }
+
+  .time-opt:disabled { opacity:0.3; cursor:not-allowed; }
+
+  .custom-time-wrap { margin-top:10px; }
+
+  .custom-time-input {
+    width:100%; padding:8px 10px;
+    background:rgba(255,255,255,0.04); border:1px solid var(--border);
+    border-radius:6px; color:var(--text); font-family:var(--mono); font-size:12px;
+    outline:none; transition:border-color 0.15s;
+  }
+
+  .custom-time-input:focus { border-color:var(--accent); }
+  .custom-time-input.error { border-color:var(--warn); }
+  .custom-time-input:disabled { opacity:0.3; cursor:not-allowed; }
+
+  .custom-time-hint {
+    margin-top:5px; font-family:var(--mono); font-size:10px; color:var(--text-dim);
+  }
+
+  .custom-time-error {
+    margin-top:4px; font-family:var(--mono); font-size:10px; color:var(--warn);
+    min-height:14px;
+  }
+
+  /* 타이머 */
+  .timer-display {
+    font-family:var(--mono); font-size:48px; font-weight:700;
+    color:var(--accent); letter-spacing:-0.02em; line-height:1;
+    text-shadow:0 0 20px rgba(0,229,255,0.3);
+  }
+
+  .timer-display.done { color:var(--ok); text-shadow:0 0 20px rgba(46,204,113,0.3); }
+  .timer-sub { font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:6px; }
+
+  .blink-count {
+    font-family:var(--mono); font-size:72px; font-weight:700;
+    letter-spacing:-0.04em; line-height:1;
+    transition:transform 0.1s ease, color 0.1s ease;
+  }
+
+  .blink-count.flash { transform:scale(1.12); color:var(--accent); }
+  .blink-unit { font-family:var(--mono); font-size:14px; color:var(--text-dim); margin-top:4px; }
+
+  .bpm-row {
+    display:flex; align-items:baseline; gap:6px;
+    margin-top:12px; padding-top:12px; border-top:1px solid var(--border);
+  }
+
+  .bpm-val  { font-family:var(--mono); font-size:22px; font-weight:700; color:var(--accent2); }
+  .bpm-label { font-size:11px; color:var(--text-dim); }
+
+  .calib-result {
+    display:none; margin-top:8px; padding:7px 10px; border-radius:6px;
+    background:rgba(243,156,18,0.08); border:1px solid rgba(243,156,18,0.2);
+    font-family:var(--mono); font-size:10px; color:var(--orange); line-height:1.6;
+  }
+
+  .calib-result.show { display:block; }
+
+  /* [5번] 실시간 gap 표시 */
+  .gap-live {
+    display:none; margin-top:6px; padding:5px 8px; border-radius:5px;
+    background:rgba(255,71,87,0.07); border:1px solid rgba(255,71,87,0.15);
+    font-family:var(--mono); font-size:10px; color:var(--warn);
+  }
+
+  .gap-live.show { display:block; }
+
+  .btn-primary {
+    width:100%; padding:14px; background:var(--accent); color:var(--bg);
+    border:none; border-radius:8px; font-family:var(--mono); font-size:13px;
+    font-weight:700; letter-spacing:0.05em; cursor:pointer;
+    transition:all 0.2s ease; text-transform:uppercase;
+  }
+
+  .btn-primary:hover:not(:disabled) { background:#fff; box-shadow:0 0 24px rgba(0,229,255,0.4); }
+  .btn-primary:disabled { opacity:0.35; cursor:not-allowed; }
+
+  .btn-secondary {
+    width:100%; padding:11px; background:transparent; color:var(--text-dim);
+    border:1px solid var(--border); border-radius:8px; font-family:var(--mono);
+    font-size:12px; cursor:pointer; transition:all 0.2s ease;
+    text-transform:uppercase; letter-spacing:0.05em;
+  }
+
+  .btn-secondary:hover:not(:disabled) { border-color:var(--text-dim); color:var(--text); }
+  .btn-secondary:disabled { opacity:0.3; cursor:not-allowed; }
+
+  /* 타임라인 */
+  #timelineWrap { margin-top:16px; display:none; }
+
+  .tl-label {
+    font-family:var(--mono); font-size:10px; color:var(--text-dim);
+    letter-spacing:0.2em; text-transform:uppercase; margin-bottom:8px;
+  }
+
+  #timelineBar { display:flex; height:24px; gap:2px; overflow:hidden; }
+
+  .tl-seg { flex:1; height:100%; border-radius:3px; background:var(--border); }
+  .tl-seg.has-blink { background:linear-gradient(180deg,var(--accent),var(--accent2)); box-shadow:0 0 6px rgba(0,229,255,0.3); }
+  /* gap 구간 표시 */
+  .tl-seg.has-gap { background:rgba(255,71,87,0.35); }
+
+  .tip { font-size:11px; color:var(--text-dim); text-align:center; padding:8px; line-height:1.6; }
+  .tip span { color:var(--accent); }
+
+  /* 팝업 */
+  .popup {
+    position:fixed; top:0; left:0; right:0; bottom:0;
+    background:rgba(0,0,0,0.8);
+    display:flex; align-items:center; justify-content:center;
+    z-index:100; opacity:0; pointer-events:none; transition:opacity 0.3s ease;
+  }
+
+  .popup.show { opacity:1; pointer-events:auto; }
+
+  .popup-content {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:24px; max-width:400px; width:90%; text-align:center;
+  }
+
+  .popup-title { font-family:var(--mono); font-size:18px; font-weight:700; margin-bottom:16px; color:var(--accent); }
+
+  .popup-body { font-size:14px; line-height:1.6; color:var(--text-dim); margin-bottom:24px; }
+
+  .popup-btn {
+    background:var(--accent); color:var(--bg); border:none; border-radius:8px;
+    padding:12px 24px; font-family:var(--mono); font-size:14px; font-weight:700;
+    cursor:pointer; transition:all 0.2s ease;
+  }
+
+  .popup-btn:hover { background:#fff; box-shadow:0 0 20px rgba(0,229,255,0.4); }
+
+  /* ═══════════════════════════════════════
+     PAGE 2 — 결과 화면
+  ═══════════════════════════════════════ */
+  #page2 .container { max-width:720px; }
+
+  .back-btn {
+    display:inline-flex; align-items:center; gap:8px;
+    background:transparent; border:1px solid var(--border);
+    color:var(--text-dim); padding:8px 16px; border-radius:8px;
+    font-family:var(--mono); font-size:12px; cursor:pointer;
+    transition:all 0.2s; margin-bottom:32px;
+    text-transform:uppercase; letter-spacing:0.05em;
+  }
+
+  .back-btn:hover { border-color:var(--text-dim); color:var(--text); }
+
+  /* 결과 히어로 */
+  .result-hero {
+    text-align:center; padding:40px 20px; border-radius:16px;
+    border:1px solid var(--border); background:var(--surface);
+    margin-bottom:24px; position:relative; overflow:hidden;
+  }
+
+  .result-hero::before {
+    content:''; position:absolute; inset:0;
+    background:radial-gradient(ellipse at 50% 0%, rgba(0,229,255,0.08) 0%, transparent 70%);
+    pointer-events:none;
+  }
+
+  .result-hero-label {
+    font-family:var(--mono); font-size:11px;
+    letter-spacing:0.3em; color:var(--text-dim);
+    text-transform:uppercase; margin-bottom:16px;
+  }
+
+  .result-big-num {
+    font-family:var(--mono); font-size:clamp(64px,15vw,100px);
+    font-weight:700; line-height:1; letter-spacing:-0.04em;
+  }
+
+  .result-big-unit { font-family:var(--mono); font-size:18px; color:var(--text-dim); margin-top:4px; }
+
+  .result-judge-badge {
+    display:inline-block; margin-top:20px; padding:10px 24px;
+    border-radius:30px; font-family:var(--mono); font-size:15px;
+    font-weight:700; letter-spacing:0.03em;
+  }
+
+  /* [5번] 신뢰도 배지 */
+  .reliability-badge {
+    display:inline-block; margin-top:10px; margin-left:8px;
+    padding:5px 14px; border-radius:20px;
+    font-family:var(--mono); font-size:11px; font-weight:700;
+    vertical-align:middle;
+  }
+
+  /* 상태별 색상 */
+  .state-danger { color:#ff4757; background:rgba(255,71,87,0.1);  border:1px solid rgba(255,71,87,0.3); }
+  .state-low    { color:#ff6b35; background:rgba(255,107,53,0.1); border:1px solid rgba(255,107,53,0.3); }
+  .state-normal { color:var(--ok); background:rgba(46,204,113,0.1); border:1px solid rgba(46,204,113,0.3); }
+  .state-high   { color:var(--orange); background:rgba(243,156,18,0.1); border:1px solid rgba(243,156,18,0.3); }
+
+  /* 통계 비교 카드 — [5번] 4번째 카드 추가로 2x2 */
+  .stats-grid {
+    display:grid; grid-template-columns:repeat(2,1fr);
+    gap:14px; margin-bottom:24px;
+  }
+
+  @media (min-width:540px) { .stats-grid { grid-template-columns:repeat(4,1fr); } }
+
+  .stat-card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:18px; text-align:center;
+  }
+
+  .stat-card-label { font-size:11px; color:var(--text-dim); margin-bottom:10px; }
+
+  .stat-card-val {
+    font-family:var(--mono); font-size:26px; font-weight:700; line-height:1;
+  }
+
+  .stat-card-unit { font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:4px; }
+
+  /* [5번] 낮은 신뢰도 경고 배너 */
+  .reliability-warning {
+    display:none; border-radius:10px; padding:16px 20px; margin-bottom:24px;
+    border:1px solid rgba(255,71,87,0.35); background:rgba(255,71,87,0.08);
+    font-size:13px; color:var(--text-dim); line-height:1.7;
+  }
+
+  .reliability-warning.show { display:block; }
+  .reliability-warning strong { color:var(--warn); }
+
+  /* 비교 바 */
+  .compare-section {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:24px; margin-bottom:24px;
+  }
+
+  .compare-title {
+    font-family:var(--mono); font-size:11px;
+    letter-spacing:0.25em; color:var(--text-dim);
+    text-transform:uppercase; margin-bottom:20px;
+  }
+
+  .compare-bar-wrap { margin-bottom:20px; }
+
+  .compare-bar-label {
+    display:flex; justify-content:space-between;
+    font-size:12px; margin-bottom:8px;
+  }
+
+  .compare-bar-label .name { color:var(--text-dim); }
+  .compare-bar-label .val  { font-family:var(--mono); font-weight:700; }
+
+  .bar-track { height:10px; background:var(--border); border-radius:5px; overflow:visible; position:relative; }
+
+  .bar-fill {
+    height:100%; border-radius:5px;
+    transition:width 1s cubic-bezier(0.25,1,0.5,1); position:relative;
+  }
+
+  .bar-normal-zone {
+    position:absolute; top:0; height:100%;
+    background:rgba(46,204,113,0.12);
+    border-left:1px dashed rgba(46,204,113,0.4);
+    border-right:1px dashed rgba(46,204,113,0.4);
+    border-radius:5px;
+  }
+
+  /* 어드바이스 카드 */
+  .advice-card { border-radius:12px; padding:24px; margin-bottom:24px; border:1px solid; }
+
+  .advice-title {
+    font-family:var(--mono); font-size:13px; font-weight:700;
+    margin-bottom:12px; display:flex; align-items:center; gap:8px;
+  }
+
+  .advice-body { font-size:13px; line-height:1.85; color:var(--text-dim); }
+  .advice-body strong { color:var(--text); font-weight:500; }
+
+  /* 팁 리스트 */
+  .tip-list {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:24px; margin-bottom:24px;
+  }
+
+  .tip-list-title {
+    font-family:var(--mono); font-size:11px; letter-spacing:0.25em;
+    color:var(--text-dim); text-transform:uppercase; margin-bottom:16px;
+  }
+
+  .tip-item {
+    display:flex; gap:14px; padding:12px 0;
+    border-bottom:1px solid var(--border); align-items:flex-start;
+  }
+
+  .tip-item:last-child { border-bottom:none; }
+
+  .tip-icon {
+    width:32px; height:32px; border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:16px; flex-shrink:0;
+    background:rgba(0,229,255,0.08); border:1px solid rgba(0,229,255,0.15);
+  }
+
+  .tip-content-title { font-size:13px; font-weight:500; margin-bottom:3px; }
+  .tip-content-desc  { font-size:12px; color:var(--text-dim); line-height:1.6; }
+
+  /* 버튼 영역 */
+  .result-actions { display:flex; flex-direction:column; gap:12px; }
+
+  .remeasure-btn {
+    width:100%; padding:16px;
+    background:linear-gradient(135deg,var(--accent2),var(--accent));
+    color:#fff; border:none; border-radius:10px;
+    font-family:var(--mono); font-size:14px; font-weight:700;
+    letter-spacing:0.05em; cursor:pointer; transition:all 0.3s ease;
+    text-transform:uppercase; box-shadow:0 4px 20px rgba(0,229,255,0.2);
+  }
+
+  .remeasure-btn:hover { transform:translateY(-2px); box-shadow:0 8px 28px rgba(0,229,255,0.35); }
+
+  /* [6번] 저장 버튼 */
+  .save-btn {
+    width:100%; padding:14px;
+    background:transparent; color:var(--text-dim);
+    border:1px solid var(--border); border-radius:10px;
+    font-family:var(--mono); font-size:13px; font-weight:700;
+    letter-spacing:0.05em; cursor:pointer; transition:all 0.2s ease;
+    text-transform:uppercase; display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+
+  .save-btn:hover:not(:disabled) {
+    border-color:var(--accent); color:var(--accent);
+    box-shadow:0 0 16px rgba(0,229,255,0.15);
+  }
+
+  .save-btn:disabled { opacity:0.4; cursor:not-allowed; }
+
+  .save-btn.loading { color:var(--orange); border-color:var(--orange); }
+  .save-btn.success { color:var(--ok);     border-color:var(--ok); }
+  .save-btn.fail    { color:var(--warn);   border-color:var(--warn); }
+
+  /* [6번] html2canvas 미지원 안내 */
+  .save-unavail {
+    font-family:var(--mono); font-size:10px; color:var(--text-dim);
+    text-align:center; padding:6px 0;
+  }
+
+  /* 애니메이션 */
+  @keyframes countUp {
+    from { opacity:0; transform:scale(0.8) translateY(10px); }
+    to   { opacity:1; transform:scale(1) translateY(0); }
+  }
+
+  .animate-in { animation:countUp 1.6s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+</style>
+</head>
+<body>
+
+<!-- ═══ PAGE 1: 측정 화면 ═══ -->
+<div class="page" id="page1">
+<div class="container">
+  <header>
+    <div class="title-tag">👁 Eye Tracking · v3</div>
+    <h1>BLINK <span>COUNTER</span></h1>
+    <p class="subtitle">눈이 너무 건조하다..</p>
+  </header>
+
+  <div class="main-grid">
+    <div>
+      <div class="camera-wrap">
+        <video id="videoEl" autoplay muted playsinline></video>
+        <canvas id="canvasEl"></canvas>
+
+        <div class="camera-status">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">카메라 대기</span>
+        </div>
+
+        <!-- [2번] 거리 경고 -->
+        <div class="distance-warn" id="distanceWarn">
+          ⚠ 얼굴이 너무 멉니다 — 카메라에 더 가까이 위치하세요
+        </div>
+
+        <div class="ear-bar-wrap" id="earBarWrap" style="display:none">
+          <div class="ear-label">
+            <span>EAR (눈 개방도)</span>
+            <span id="earVal">0.000</span>
+          </div>
+          <div class="ear-track">
+            <div class="ear-fill" id="earFill"></div>
+            <div class="ear-thresh-marker" id="earThreshMarker" style="left:35%"></div>
+          </div>
+        </div>
+
+        <div id="calibOverlay">
+          <div class="calib-title">캘리브레이션</div>
+          <div class="calib-sub">눈을 자연스럽게 뜨고 정면을 바라보세요!!!!</div>
+          <div class="calib-ring-wrap">
+            <svg width="80" height="80" viewBox="0 0 80 80">
+              <circle class="calib-ring-bg"   cx="40" cy="40" r="36"/>
+              <circle class="calib-ring-prog" id="calibRing" cx="40" cy="40" r="36"/>
+            </svg>
+            <div class="calib-count" id="calibCountdown">5</div>
+          </div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim)" id="calibEarLive">EAR: —</div>
+        </div>
+
+        <div id="loadingOverlay">
+          <div class="loader-ring"></div>
+          <div class="loader-text" id="loadingText">
+            MediaPipe 로딩 중...<br>
+            <span style="font-size:10px;opacity:0.6">첫 로드 약 5~10초 소요</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="timelineWrap">
+        <div class="card" style="margin-top:16px">
+          <div class="tl-label">깜빡임 타임라인 (초 단위) &nbsp;|&nbsp; <span style="color:var(--warn);opacity:.7">■</span> 인식 공백</div>
+          <div id="timelineBar"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="side-panel">
+
+      <!-- [1번] 측정 시간 선택 -->
+      <div class="card" id="timeSelectCard">
+        <div class="card-label">측정 시간</div>
+        <div class="time-opts" id="timeOpts">
+          <button class="time-opt"        data-sec="60">1분</button>
+          <button class="time-opt"        data-sec="120">2분</button>
+          <button class="time-opt active" data-sec="180">3분</button>
+          <button class="time-opt"        data-sec="300">5분</button>
+          <button class="time-opt"        data-sec="custom">직접</button>
+        </div>
+        <div class="custom-time-wrap" id="customTimeWrap" style="display:none">
+          <input type="number" id="customTimeInput" class="custom-time-input"
+                 placeholder="초 입력 (30 ~ 600)" min="30" max="600" step="1">
+          <div class="custom-time-hint">30초 ~ 600초 (10분)</div>
+          <div class="custom-time-error" id="customTimeError"></div>
+        </div>
+      </div>
+
+      <!-- 타이머 -->
+      <div class="card">
+        <div class="card-label">남은 시간</div>
+        <div class="timer-display" id="timerDisp">3:00</div>
+        <div class="timer-sub" id="timerSub">시작 전</div>
+      </div>
+
+      <!-- 깜빡임 횟수 -->
+      <div class="card">
+        <div class="card-label">깜빡임 횟수</div>
+        <div class="blink-count" id="blinkCount">0</div>
+        <div class="blink-unit">회</div>
+        <div class="bpm-row">
+          <div class="bpm-val" id="bpmVal">—</div>
+          <div class="bpm-label">회/분 (현재 속도)</div>
+        </div>
+        <div id="calibResult" class="calib-result"></div>
+        <!-- [5번] 실시간 gap 표시 -->
+        <div id="gapLive" class="gap-live">인식 공백: 0초</div>
+      </div>
+
+      <button class="btn-primary"   id="startBtn" disabled>모델 로딩 중...</button>
+      <button class="btn-secondary" id="resetBtn" disabled>초기화</button>
+
+      <p class="tip">정면을 바라보고, 얼굴이 <span>카메라 중앙</span>에 오도록 잘 ~ 위치하세요</p>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- 사용법 팝업 -->
+<div id="usagePopup" class="popup">
+  <div class="popup-content">
+    <div class="popup-title">측정 전 사용법</div>
+    <div class="popup-body">
+      <p>눈 깜빡임 측정을 시작하기 전에 다음 사항을 확인하세요:</p>
+      <ul style="text-align:left; margin:16px 0;">
+        <li>정면을 바라보고 얼굴이 카메라 중앙에 위치하도록 하세요.</li>
+        <li>눈을 자연스럽게 뜨고, 안경이나 렌즈를 착용한 상태로 측정하세요.</li>
+        <li>측정 중에는 고개를 움직이지 말고, 자연스러운 상태를 유지하세요.</li>
+        <li>시작 후 먼저 캘리브레이션(5초)이 진행된 다음 측정이 시작됩니다.</li>
+      </ul>
+      <p>준비가 되었으면 확인 버튼을 눌러 시작하세요.</p>
+    </div>
+    <button class="popup-btn" id="confirmStartBtn">확인</button>
+  </div>
+</div>
+
+<!-- ═══ PAGE 2: 결과 화면 ═══ -->
+<div class="page hidden-right" id="page2">
+<div class="container" id="resultContainer">
+
+  <button class="back-btn" id="backBtn">← 다시 측정</button>
+
+  <header>
+    <div class="title-tag">📊 측정 결과</div>
+    <h1>YOUR <span>RESULT</span></h1>
+    <p class="subtitle" id="resultDate"></p>
+  </header>
+
+  <!-- 히어로: 총 깜빡임 + 판정 -->
+  <div class="result-hero">
+    <div class="result-hero-label" id="heroLabel">— 총 깜빡임</div>
+    <div class="result-big-num" id="heroNum">—</div>
+    <div class="result-big-unit">회 &nbsp;/&nbsp; <span id="heroBpm">—</span> 회/분</div>
+    <div>
+      <div class="result-judge-badge" id="judgeBadge">—</div>
+    </div>
+    <!-- [5번] 신뢰도 배지 -->
+    <div style="margin-top:14px">
+      <span class="reliability-badge" id="reliabilityBadge">신뢰도: —</span>
+    </div>
+  </div>
+
+  <!-- [5번] 낮은 신뢰도 경고 -->
+  <div class="reliability-warning" id="reliabilityWarning">
+    <strong>⚠ 측정 신뢰도가 낮습니다.</strong><br>
+    측정 중 얼굴 인식 공백이 <span id="warnGapPct">—</span>% 발생했습니다.
+    결과 수치가 실제보다 낮게 나왔을 수 있습니다. 다시 측정하는 것을 권장합니다.
+  </div>
+
+  <!-- 4개 통계 카드 -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-card-label">내 깜빡임 (분당)</div>
+      <div class="stat-card-val" id="statMine">—</div>
+      <div class="stat-card-unit">회/분</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">성인 평균</div>
+      <div class="stat-card-val" style="color:var(--ok)">17</div>
+      <div class="stat-card-unit">회/분</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">정상 범위</div>
+      <div class="stat-card-val" style="color:var(--accent)">15–20</div>
+      <div class="stat-card-unit">회/분</div>
+    </div>
+    <!-- [5번] 인식 공백 카드 -->
+    <div class="stat-card">
+      <div class="stat-card-label">인식 공백</div>
+      <div class="stat-card-val" id="statGap">—</div>
+      <div class="stat-card-unit" id="statGapUnit">초</div>
+    </div>
+  </div>
+
+  <!-- 시각 비교 바 -->
+  <div class="compare-section">
+    <div class="compare-title">범위 비교</div>
+
+    <div class="compare-bar-wrap">
+      <div class="compare-bar-label">
+        <span class="name">내 수치</span>
+        <span class="val" id="barMyLabel">—</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-normal-zone" id="normalZone"></div>
+        <div class="bar-fill" id="barMy" style="width:0%"></div>
+      </div>
+    </div>
+
+    <div class="compare-bar-wrap">
+      <div class="compare-bar-label">
+        <span class="name">성인 평균</span>
+        <span class="val">17 회/분</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-normal-zone" id="normalZone2"></div>
+        <div class="bar-fill" style="width:0%;background:var(--ok)" id="barAvg"></div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px">
+      <span style="display:inline-block;width:10px;height:10px;background:rgba(46,204,113,0.3);border:1px dashed rgba(46,204,113,0.5);border-radius:2px"></span>
+      초록 구간 = 정상 범위 (15–20 회/분)
+    </div>
+  </div>
+
+  <!-- 어드바이스 -->
+  <div class="advice-card" id="adviceCard">
+    <div class="advice-title" id="adviceTitle">—</div>
+    <div class="advice-body"  id="adviceBody">—</div>
+  </div>
+
+  <!-- 팁 -->
+  <div class="tip-list" id="tipList"></div>
+
+  <!-- 버튼 영역 -->
+  <div class="result-actions">
+    <button class="remeasure-btn" id="remeasureBtn">↺ 다시 측정하기</button>
+    <!-- [6번] 이미지 저장 버튼 -->
+    <button class="save-btn" id="saveBtn">
+      <span id="saveBtnIcon">⬇</span>
+      <span id="saveBtnText">결과 이미지 저장</span>
+    </button>
+    <div class="save-unavail" id="saveUnavail" style="display:none">
+      이미지 저장은 이 브라우저에서 지원되지 않습니다.
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════
+// 상수 (변경 불가)
+// ═══════════════════════════════════════════════════
+const CALIB_SEC          = 5;
+const BLINK_MIN_MS       = 80;
+const BLINK_MAX_MS       = 400;
+const THRESH_RATIO       = 0.75;
+const BPM_MAX_DISPLAY    = 35;    // 비교 바 100% 기준
+const GAP_MIN_MS         = 500;   // 이 미만 연속 미감지는 노이즈로 간주, 집계 제외
+const FACE_TOO_FAR_THR   = 0.12;  // 정규화 얼굴 너비 임계값 (이 미만 = 너무 멀다)
+const EAR_SMOOTH_N       = 3;     // EAR 이동평균 프레임 수
+
+// EAR 계산 핵심 6포인트
+const LEFT_EYE_EAR      = [362,385,387,263,373,380];
+const RIGHT_EYE_EAR     = [33, 160,158,133,153,144];
+// 시각화용 정밀 윤곽 (refined landmarks)
+const LEFT_EYE_OUTLINE  = [362,382,381,380,374,373,390,249,263,466,388,387,386,385,384,398];
+const RIGHT_EYE_OUTLINE = [33,  7, 163,144,145,153,154,155,133,173,157,158,159,160,161,246];
+// 얼굴 너비 측정용 (좌/우 광대 끝)
+const FACE_LEFT_IDX  = 234;
+const FACE_RIGHT_IDX = 454;
+
+// ═══════════════════════════════════════════════════
+// [1번] 측정 시간 — 동적 상태
+// ═══════════════════════════════════════════════════
+let selectedDurationSec = 180; // 사용자가 선택한 시간 (reset 후에도 유지)
+let DURATION_SEC        = 180; // 현재 세션에 적용되는 시간
+
+// ═══════════════════════════════════════════════════
+// 측정 상태
+// ═══════════════════════════════════════════════════
+let EAR_THRESH     = 0.21;
+let calibrated     = false;
+let isCalibrating  = false;
+let calibSamples   = [];
+let calibStartTime = null;
+
+// [2번] EAR 스무딩 버퍼
+let earBuffer = [];
+
+let eyeClosedAt   = null;
+let blinkCount    = 0;
+
+let timerInterval = null;
+let timeLeft      = DURATION_SEC;
+let isRunning     = false;
+let isDone        = false;
+let secondsPassed = 0;
+let timelineData  = [];   // 초별 깜빡임 수
+let timelineGap   = [];   // 초별 gap 여부
+
+// [5번] Gap 추적
+let gapStartTime = null;  // 현재 gap 시작 시각 (null = 얼굴 인식 중)
+let totalGapMs   = 0;     // 누적 gap 시간 (500ms 이상만)
+
+// ═══════════════════════════════════════════════════
+// DOM — page1
+// ═══════════════════════════════════════════════════
+const videoEl        = document.getElementById('videoEl');
+const canvasEl       = document.getElementById('canvasEl');
+const ctx            = canvasEl.getContext('2d');
+const loadingOv      = document.getElementById('loadingOverlay');
+const loadingText    = document.getElementById('loadingText');
+const statusDot      = document.getElementById('statusDot');
+const statusTextEl   = document.getElementById('statusText');
+const distanceWarn   = document.getElementById('distanceWarn');
+const earBarWrap     = document.getElementById('earBarWrap');
+const earFill        = document.getElementById('earFill');
+const earValEl       = document.getElementById('earVal');
+const earThreshMark  = document.getElementById('earThreshMarker');
+const calibOverlay   = document.getElementById('calibOverlay');
+const calibRing      = document.getElementById('calibRing');
+const calibCD        = document.getElementById('calibCountdown');
+const calibEarLive   = document.getElementById('calibEarLive');
+const timerDisp      = document.getElementById('timerDisp');
+const timerSub       = document.getElementById('timerSub');
+const blinkCountEl   = document.getElementById('blinkCount');
+const bpmValEl       = document.getElementById('bpmVal');
+const calibResult    = document.getElementById('calibResult');
+const gapLive        = document.getElementById('gapLive');
+const startBtn       = document.getElementById('startBtn');
+const resetBtn       = document.getElementById('resetBtn');
+const timelineWrap   = document.getElementById('timelineWrap');
+const timelineBar    = document.getElementById('timelineBar');
+const usagePopup     = document.getElementById('usagePopup');
+const confirmStartBtn = document.getElementById('confirmStartBtn');
+
+// ═══════════════════════════════════════════════════
+// [1번] 시간 선택 로직
+// ═══════════════════════════════════════════════════
+const timeOptBtns    = document.querySelectorAll('.time-opt');
+const customTimeWrap = document.getElementById('customTimeWrap');
+const customTimeInput = document.getElementById('customTimeInput');
+const customTimeError = document.getElementById('customTimeError');
+
+function lockTimeSelect(locked) {
+  timeOptBtns.forEach(b => b.disabled = locked);
+  customTimeInput.disabled = locked;
+}
+
+function applyDuration(sec) {
+  DURATION_SEC         = sec;
+  selectedDurationSec  = sec;
+  timeLeft             = sec;
+  timelineData         = new Array(sec).fill(0);
+  timelineGap          = new Array(sec).fill(false);
+  timerDisp.textContent = formatTime(sec);
+}
+
+function validateAndApplyCustom() {
+  const raw = customTimeInput.value.trim();
+  customTimeError.textContent = '';
+  customTimeInput.classList.remove('error');
+
+  // 빈 값
+  if (raw === '') {
+    customTimeError.textContent = '값을 입력하세요.';
+    customTimeInput.classList.add('error');
+    return false;
+  }
+
+  // 숫자가 아닌 문자 포함
+  if (!/^\d+$/.test(raw)) {
+    customTimeError.textContent = '숫자만 입력하세요.';
+    customTimeInput.classList.add('error');
+    return false;
+  }
+
+  const sec = parseInt(raw, 10);
+
+  if (sec < 30) {
+    customTimeError.textContent = '최소 30초 이상이어야 합니다.';
+    customTimeInput.classList.add('error');
+    return false;
+  }
+
+  if (sec > 600) {
+    customTimeError.textContent = '최대 600초(10분)까지 가능합니다.';
+    customTimeInput.classList.add('error');
+    return false;
+  }
+
+  applyDuration(sec);
+  return true;
+}
+
+timeOptBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.disabled) return;
+
+    // 기존 active 해제
+    timeOptBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    const val = btn.dataset.sec;
+
+    if (val === 'custom') {
+      customTimeWrap.style.display = 'block';
+      customTimeInput.focus();
+      // custom 입력값이 유효하면 바로 적용
+      if (customTimeInput.value.trim()) {
+        validateAndApplyCustom();
+      }
+    } else {
+      customTimeWrap.style.display = 'none';
+      customTimeError.textContent = '';
+      customTimeInput.classList.remove('error');
+      applyDuration(parseInt(val, 10));
+    }
+  });
+});
+
+customTimeInput.addEventListener('input', () => {
+  // 입력 중에는 에러 초기화
+  customTimeError.textContent = '';
+  customTimeInput.classList.remove('error');
+});
+
+customTimeInput.addEventListener('blur', () => {
+  if (customTimeInput.value.trim()) {
+    validateAndApplyCustom();
+  }
+});
+
+customTimeInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') validateAndApplyCustom();
+});
+
+// ═══════════════════════════════════════════════════
+// [2번] EAR 스무딩
+// ═══════════════════════════════════════════════════
+function smoothEAR(raw) {
+  earBuffer.push(raw);
+  if (earBuffer.length > EAR_SMOOTH_N) earBuffer.shift();
+  return earBuffer.reduce((a, b) => a + b, 0) / earBuffer.length;
+}
+
+function resetEARBuffer() {
+  earBuffer = [];
+}
+
+// ═══════════════════════════════════════════════════
+// EAR 계산
+// ═══════════════════════════════════════════════════
+function dist(a, b) {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+}
+
+function calcEAR(lm, idx) {
+  const [p1,p2,p3,p4,p5,p6] = idx.map(i => lm[i]);
+  const h = dist(p1, p4);
+  if (h < 1e-6) return 0;
+  return (dist(p2, p6) + dist(p3, p5)) / (2 * h);
+}
+
+// [2번] 얼굴 너비로 거리 추정 (정규화 좌표 기준)
+function getFaceWidth(lm) {
+  return Math.abs(lm[FACE_RIGHT_IDX].x - lm[FACE_LEFT_IDX].x);
+}
+
+// ═══════════════════════════════════════════════════
+// 캘리브레이션
+// ═══════════════════════════════════════════════════
+function startCalibration() {
+  // 캘리브레이션 시작 시 custom 입력 검증
+  const activeOpt = document.querySelector('.time-opt.active');
+  if (activeOpt && activeOpt.dataset.sec === 'custom') {
+    if (!validateAndApplyCustom()) {
+      startBtn.disabled = false;
+      return;
+    }
+  }
+
+  isCalibrating   = true;
+  calibSamples    = [];
+  calibStartTime  = Date.now();
+  resetEARBuffer();
+  lockTimeSelect(true);
+
+  calibOverlay.classList.add('show');
+  statusDot.className      = 'status-dot calib';
+  statusTextEl.textContent = '캘리브레이션 중';
+  startBtn.disabled = true;
+}
+
+function updateCalibUI(ear) {
+  const elapsed  = (Date.now() - calibStartTime) / 1000;
+  const progress = Math.min(elapsed / CALIB_SEC, 1);
+  const remain   = Math.max(0, Math.ceil(CALIB_SEC - elapsed));
+
+  calibRing.style.strokeDashoffset = 226 * (1 - progress);
+  calibCD.textContent = remain;
+  calibEarLive.textContent = `EAR: ${ear.toFixed(3)}`;
+
+  if (elapsed >= CALIB_SEC) finishCalibration();
+}
+
+function finishCalibration() {
+  isCalibrating = false;
+  calibOverlay.classList.remove('show');
+
+  if (calibSamples.length < 5) {
+    // 샘플이 너무 적으면 실패 처리
+    alert('캘리브레이션 실패: 얼굴이 감지되지 않았습니다. 카메라에 얼굴이 잘 보이도록 조정하세요.');
+    lockTimeSelect(false);
+    resetToReady();
+    return;
+  }
+
+  // 이상치 제거: 상하 10% 제거 후 평균 (극단값이 임계값을 오염하는 것 방지)
+  const sorted = [...calibSamples].sort((a, b) => a - b);
+  const trim   = Math.floor(sorted.length * 0.1);
+  const trimmed = sorted.slice(trim, sorted.length - trim);
+  const avg    = trimmed.reduce((a, b) => a + b, 0) / trimmed.length;
+
+  EAR_THRESH = avg * THRESH_RATIO;
+  calibrated = true;
+
+  const pct = Math.min(100, Math.max(0, ((EAR_THRESH - 0.10) / 0.25) * 100));
+  earThreshMark.style.left = pct + '%';
+
+  calibResult.textContent  = `캘리브레이션 완료  기준 EAR ${avg.toFixed(3)} → 임계값 ${EAR_THRESH.toFixed(3)}`;
+  calibResult.classList.add('show');
+
+  statusDot.className      = 'status-dot active';
+  statusTextEl.textContent = '캘리브레이션 완료';
+
+  startMeasure();
+}
+
+// ═══════════════════════════════════════════════════
+// 측정
+// ═══════════════════════════════════════════════════
+function startMeasure() {
+  isRunning = true;
+
+  // 타임라인 데이터 초기화 (DURATION_SEC 기준)
+  timelineData = new Array(DURATION_SEC).fill(0);
+  timelineGap  = new Array(DURATION_SEC).fill(false);
+
+  timerSub.textContent  = '측정 중...';
+  startBtn.textContent  = '측정 중...';
+  startBtn.disabled     = true;
+  resetBtn.disabled     = false;
+  gapLive.classList.add('show');
+  initTimeline();
+  startTimer();
+}
+
+function startTimer() {
+  timerInterval = setInterval(() => {
+    if (!isRunning) return;
+    timeLeft--;
+    secondsPassed++;
+    timerDisp.textContent = formatTime(timeLeft);
+
+    const elapsed = DURATION_SEC - timeLeft;
+    if (elapsed > 0) {
+      const bpm = (blinkCount / elapsed * 60).toFixed(1);
+      bpmValEl.textContent = bpm;
+    }
+
+    // [5번] gap 실시간 업데이트
+    gapLive.textContent = `인식 공백: ${(totalGapMs / 1000).toFixed(1)}초`;
+
+    if (timeLeft <= 0) finishMeasure();
+  }, 1000); // BUG FIX: 기존 3000ms → 1000ms
+}
+
+function finishMeasure() {
+  // [5번] 측정 종료 시점에 gap이 활성 중이면 강제 종료
+  if (gapStartTime !== null) {
+    const gapDur = Date.now() - gapStartTime;
+    if (gapDur >= GAP_MIN_MS) totalGapMs += gapDur;
+    gapStartTime = null;
+  }
+
+  clearInterval(timerInterval);
+  isRunning = false;
+  isDone    = true;
+
+  timerDisp.textContent = '0:00';
+  timerDisp.classList.add('done');
+  timerSub.textContent  = '측정 완료! 결과 확인 중...';
+  startBtn.textContent  = '완료';
+  startBtn.disabled     = true;
+  resetBtn.disabled     = false;
+
+  setTimeout(() => showResultPage(), 800);
+}
+
+// ═══════════════════════════════════════════════════
+// 유틸
+// ═══════════════════════════════════════════════════
+function formatTime(s) {
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+}
+
+// [1번] 결과 히어로 라벨용 (예: "3분간", "1분 30초간")
+function formatDurationLabel(sec) {
+  if (sec < 60)      return `${sec}초간`;
+  if (sec % 60 === 0) return `${sec / 60}분간`;
+  return `${Math.floor(sec / 60)}분 ${sec % 60}초간`;
+}
+
+function initTimeline() {
+  timelineBar.innerHTML = '';
+  for (let i = 0; i < DURATION_SEC; i++) {
+    const seg = document.createElement('div');
+    seg.className = 'tl-seg';
+    seg.id = `tl-${i}`;
+    timelineBar.appendChild(seg);
+  }
+  timelineWrap.style.display = 'block';
+}
+
+function incrementBlink() {
+  blinkCount++;
+  const sec = DURATION_SEC - timeLeft;
+  if (sec >= 0 && sec < DURATION_SEC) timelineData[sec]++;
+
+  blinkCountEl.textContent = blinkCount;
+  blinkCountEl.classList.add('flash');
+  setTimeout(() => blinkCountEl.classList.remove('flash'), 150);
+
+  const seg = document.getElementById(`tl-${sec}`);
+  if (seg) seg.classList.add('has-blink');
+}
+
+function resetToReady() {
+  startBtn.textContent = '측정 시작 (캘리브레이션)';
+  startBtn.disabled    = false;
+}
+
+// ═══════════════════════════════════════════════════
+// MediaPipe 콜백
+// ═══════════════════════════════════════════════════
+function onResults(results) {
+  canvasEl.width  = videoEl.videoWidth  || canvasEl.offsetWidth;
+  canvasEl.height = videoEl.videoHeight || canvasEl.offsetHeight;
+  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+
+  // ── 얼굴 미감지 ──────────────────────────────────
+  if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+    statusDot.className      = 'status-dot warn';
+    statusTextEl.textContent = '얼굴 인식 안됨';
+    distanceWarn.classList.remove('show');
+
+    // 눈 감기 추적 초기화 (얼굴 사라지면 eyeClosedAt 무효)
+    eyeClosedAt = null;
+    // EAR 버퍼 초기화 (얼굴 재등장 시 오래된 값 오염 방지)
+    resetEARBuffer();
+
+    // [5번] gap 시작
+    if (isRunning && gapStartTime === null) {
+      gapStartTime = Date.now();
+      // 현재 초를 gap으로 기록
+      const sec = DURATION_SEC - timeLeft;
+      if (sec >= 0 && sec < DURATION_SEC) {
+        timelineGap[sec] = true;
+        const seg = document.getElementById(`tl-${sec}`);
+        if (seg && !seg.classList.contains('has-blink')) {
+          seg.classList.add('has-gap');
+        }
+      }
+    }
+    return;
+  }
+
+  // ── 얼굴 감지됨 ──────────────────────────────────
+
+  // [5번] gap 종료 처리
+  if (gapStartTime !== null) {
+    const gapDur = Date.now() - gapStartTime;
+    if (gapDur >= GAP_MIN_MS) {
+      totalGapMs += gapDur;
+    }
+    gapStartTime = null;
+    resetEARBuffer(); // 재감지 시 버퍼 재시작
+  }
+
+  if (!isCalibrating && !isDone) {
+    statusDot.className      = 'status-dot active';
+    statusTextEl.textContent = isRunning ? '측정 중' : '얼굴 인식됨';
+  }
+
+  const lm = results.multiFaceLandmarks[0];
+  const W  = canvasEl.width;
+  const H  = canvasEl.height;
+
+  // [2번] 얼굴 크기 체크 (원거리 감지)
+  const faceWidth = getFaceWidth(lm);
+  const isTooFar  = faceWidth < FACE_TOO_FAR_THR;
+
+  if (isTooFar && !isCalibrating) {
+    distanceWarn.classList.add('show');
+    statusDot.className = 'status-dot far';
+    // 너무 멀면 EAR 신뢰도 낮으므로 깜빡임 판정 건너뜀
+  } else {
+    distanceWarn.classList.remove('show');
+  }
+
+  // [2번] EAR 계산 + 스무딩
+  const rawEAR  = (calcEAR(lm, LEFT_EYE_EAR) + calcEAR(lm, RIGHT_EYE_EAR)) / 2;
+  const ear     = smoothEAR(rawEAR);
+
+  // EAR 바 업데이트 (스무딩된 값 표시)
+  const pct = Math.min(100, Math.max(0, ((ear - 0.10) / 0.25) * 100));
+  earFill.style.width      = pct + '%';
+  earValEl.textContent     = ear.toFixed(3);
+  earFill.classList.toggle('blink', ear < EAR_THRESH);
+
+  // 캘리브레이션 중: 스무딩 버퍼가 충분히 찼을 때만 샘플 수집
+  // (처음 N-1 프레임은 이동평균이 불안정하므로 제외)
+  if (isCalibrating) {
+    if (earBuffer.length >= EAR_SMOOTH_N) {
+      calibSamples.push(ear);
+    }
+    updateCalibUI(ear);
+    return;
+  }
+
+  // [2번] 너무 멀면 깜빡임 판정 안 함 (EAR 신뢰도 낮음)
+  if (isRunning && !isTooFar) {
+    if (ear < EAR_THRESH) {
+      if (!eyeClosedAt) eyeClosedAt = Date.now();
+    } else {
+      if (eyeClosedAt !== null) {
+        const dur = Date.now() - eyeClosedAt;
+        // BLINK_MIN_MS ~ BLINK_MAX_MS 범위만 유효한 깜빡임으로 인정
+        if (dur >= BLINK_MIN_MS && dur <= BLINK_MAX_MS) {
+          incrementBlink();
+        }
+        eyeClosedAt = null;
+      }
+    }
+  }
+
+  // 눈 윤곽 시각화
+  const eyeColor = ear < EAR_THRESH ? 'rgba(255,71,87,1)' : 'rgba(0,229,255,1)';
+
+  const drawOutline = (indices) => {
+    const pts = indices.map(i => ({ x: lm[i].x * W, y: lm[i].y * H }));
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+    ctx.strokeStyle = eyeColor;
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+    ctx.fillStyle   = eyeColor.replace('1)', '0.08)');
+    ctx.fill();
+  };
+
+  drawOutline(LEFT_EYE_OUTLINE);
+  drawOutline(RIGHT_EYE_OUTLINE);
+
+  [...LEFT_EYE_EAR, ...RIGHT_EYE_EAR].forEach(idx => {
+    const p = lm[idx];
+    ctx.beginPath();
+    ctx.arc(p.x * W, p.y * H, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = eyeColor;
+    ctx.fill();
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// 버튼 — page1
+// ═══════════════════════════════════════════════════
+startBtn.addEventListener('click', () => {
+  if (isRunning || isDone || isCalibrating) return;
+  usagePopup.classList.add('show');
+});
+
+confirmStartBtn.addEventListener('click', () => {
+  usagePopup.classList.remove('show');
+  if (!calibrated) startCalibration(); else startMeasure();
+});
+
+resetBtn.addEventListener('click', () => {
+  clearInterval(timerInterval);
+
+  // [5번] gap 강제 종료
+  if (gapStartTime !== null) gapStartTime = null;
+
+  isRunning     = false;
+  isDone        = false;
+  isCalibrating = false;
+  calibrated    = false;
+  blinkCount    = 0;
+  eyeClosedAt   = null;
+  secondsPassed = 0;
+  EAR_THRESH    = 0.21;
+  totalGapMs    = 0;
+  gapStartTime  = null;
+  resetEARBuffer();
+
+  // [1번] reset 시 마지막 선택 시간으로 복원 (초기화해도 선택값 유지)
+  DURATION_SEC = selectedDurationSec;
+  timeLeft     = selectedDurationSec;
+  timelineData = new Array(selectedDurationSec).fill(0);
+  timelineGap  = new Array(selectedDurationSec).fill(false);
+
+  calibOverlay.classList.remove('show');
+  distanceWarn.classList.remove('show');
+  timerDisp.textContent = formatTime(selectedDurationSec);
+  timerDisp.classList.remove('done');
+  timerSub.textContent       = '시작 전';
+  blinkCountEl.textContent   = '0';
+  bpmValEl.textContent       = '—';
+  timelineWrap.style.display = 'none';
+  calibResult.classList.remove('show');
+  earThreshMark.style.left   = '35%';
+  gapLive.classList.remove('show');
+  gapLive.textContent        = '인식 공백: 0초';
+
+  lockTimeSelect(false);
+  startBtn.textContent = '측정 시작 (캘리브레이션)';
+  startBtn.disabled    = false;
+  resetBtn.disabled    = true;
+});
+
+// ═══════════════════════════════════════════════════
+// PAGE 2 — 결과 데이터
+// ═══════════════════════════════════════════════════
+const STATE_META = {
+  danger: {
+    label:   '⚠ 매우 낮음',
+    cls:     'state-danger',
+    color:   '#ff4757',
+    advTitle:'🚨 안구건조증 위험 수준입니다',
+    advBody: `분당 <strong>10회 미만</strong>은 눈물막이 유지되지 않는 수준입니다.<br>
+              장시간 화면을 응시할 때 의식적으로 깜빡이지 않아 발생하는 경우가 많습니다.<br>
+              안과 전문의 방문을 <strong>강력히 권고</strong>합니다.`,
+    advCls:  'state-danger',
+  },
+  low: {
+    label:   '▼ 낮음',
+    cls:     'state-low',
+    color:   '#ff6b35',
+    advTitle:'⚠ 정상 범위보다 낮습니다',
+    advBody: `분당 <strong>15회 이상</strong>이 권장 범위입니다.<br>
+              현재 수치는 눈물막이 충분히 재형성되지 못할 가능성이 있습니다.<br>
+              PC·스마트폰 사용 시 <strong>의식적으로 깜빡이는 습관</strong>을 만들어야 합니다.`,
+    advCls:  'state-low',
+  },
+  normal: {
+    label:   '✓ 정상',
+    cls:     'state-normal',
+    color:   '#2ecc71',
+    advTitle:'✅ 정상 범위입니다',
+    advBody: `분당 <strong>15–20회</strong>는 눈물막을 안정적으로 유지하는 이상적인 범위입니다.<br>
+              현재 눈 건강 상태가 양호합니다.<br>
+              장시간 화면 작업 시에도 이 수준을 유지하도록 꾸준히 관리하세요.`,
+    advCls:  'state-normal',
+  },
+  high: {
+    label:   '▲ 높음',
+    cls:     'state-high',
+    color:   '#f39c12',
+    advTitle:'ℹ 평균보다 높습니다',
+    advBody: `분당 <strong>20회 초과</strong>는 드물지 않지만, 지속된다면 눈의 피로·자극·이물감·
+              안검경련 등의 원인일 수 있습니다.<br>
+              눈 주변 근육 긴장이나 안구 표면 자극이 원인인 경우가 많습니다.`,
+    advCls:  'state-high',
+  },
+};
+
+const TIPS_BY_STATE = {
+  danger: [
+    { icon:'💧', title:'인공눈물 즉시 사용',  desc:'처방전 없이 구매 가능한 무방부제 인공눈물을 하루 4–6회 점안하세요.' },
+    { icon:'🖥️', title:'화면 밝기·거리 조절', desc:'모니터를 눈 높이보다 약간 낮게 배치하고 밝기를 주변 환경에 맞추세요.' },
+    { icon:'🏥', title:'안과 방문 권고',       desc:'안구건조증 중증일 수 있습니다. 눈물분비검사(Schirmer test)를 받아보세요.' },
+    { icon:'🌬️', title:'실내 습도 관리',      desc:'습도 40–60% 유지가 안구건조 예방에 효과적입니다.' },
+  ],
+  low: [
+    { icon:'⏱️', title:'20-20-20 규칙',       desc:'20분마다 20초간 6m 이상 거리를 바라보면 눈 근육 피로를 줄입니다.' },
+    { icon:'💧', title:'인공눈물 사용',         desc:'무방부제 인공눈물을 하루 2–4회 사용해 눈물막을 보충하세요.' },
+    { icon:'😌', title:'의식적 깜빡임 연습',   desc:'알람을 10분마다 설정하고 의식적으로 5–10회 깜빡이는 훈련을 해보세요.' },
+    { icon:'🖥️', title:'블루라이트 필터 적용', desc:'야간에는 블루라이트 필터를 켜거나 화면 색온도를 따뜻하게 조절하세요.' },
+  ],
+  normal: [
+    { icon:'✅', title:'현재 습관 유지',   desc:'지금의 눈 사용 패턴과 휴식 리듬을 유지하세요.' },
+    { icon:'⏱️', title:'20-20-20 규칙',   desc:'장시간 작업 시에도 20분마다 원거리를 바라보는 습관을 들이세요.' },
+    { icon:'🥗', title:'오메가-3 섭취',   desc:'오메가-3 지방산은 눈물막 유지에 도움을 줍니다.' },
+    { icon:'😴', title:'충분한 수면',      desc:'수면 중 눈의 회복이 이루어집니다. 7–8시간 수면이 눈 건강에 중요합니다.' },
+  ],
+  high: [
+    { icon:'🧘', title:'눈 근육 이완',   desc:'눈을 살짝 감고 10초간 유지하는 이완 운동을 하루 5회 실천하세요.' },
+    { icon:'🌡️', title:'온찜질',         desc:'따뜻한 수건을 눈 위에 5–10분 올려두면 눈꺼풀 분비선이 활성화됩니다.' },
+    { icon:'💊', title:'알레르기 확인',   desc:'알레르기나 이물감이 깜빡임 증가의 원인일 수 있습니다.' },
+    { icon:'📵', title:'디지털 기기 휴식', desc:'1시간마다 5분씩 화면을 끄고 눈을 쉬게 하세요.' },
+  ],
+};
+
+function getState(bpm) {
+  if (bpm < 10)  return 'danger';
+  if (bpm < 15)  return 'low';
+  if (bpm <= 20) return 'normal';
+  return 'high';
+}
+
+// [5번] 신뢰도 판정
+function getReliability(gapMs, durationSec) {
+  const gapPct = (gapMs / (durationSec * 1000)) * 100;
+  if (gapPct < 5)   return { label:'신뢰도 높음', cls:'state-normal', pct: gapPct };
+  if (gapPct < 15)  return { label:'신뢰도 보통', cls:'state-high',   pct: gapPct };
+  if (gapPct < 30)  return { label:'신뢰도 낮음', cls:'state-low',    pct: gapPct };
+  return               { label:'신뢰도 매우 낮음', cls:'state-danger', pct: gapPct };
+}
+
+// ═══════════════════════════════════════════════════
+// PAGE 2 — 결과 화면 구성
+// ═══════════════════════════════════════════════════
+function showResultPage() {
+  // [1번] BPM 계산: DURATION_SEC 기준 (하드코딩 /3 제거)
+  const durationMin = DURATION_SEC / 60;
+  const bpm   = parseFloat((blinkCount / durationMin).toFixed(1));
+  const state = getState(bpm);
+  const meta  = STATE_META[state];
+  const tips  = TIPS_BY_STATE[state];
+
+  // 날짜
+  const now = new Date();
+  document.getElementById('resultDate').textContent =
+    `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}` +
+    `  ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')} 측정`;
+
+  // [1번] 히어로 라벨 동적
+  document.getElementById('heroLabel').textContent = `${formatDurationLabel(DURATION_SEC)} 총 깜빡임`;
+
+  // 히어로 숫자
+  const heroNum = document.getElementById('heroNum');
+  heroNum.textContent = blinkCount;
+  heroNum.style.color = meta.color;
+  heroNum.classList.add('animate-in');
+  document.getElementById('heroBpm').textContent = bpm;
+
+  const badge = document.getElementById('judgeBadge');
+  badge.textContent = meta.label;
+  badge.className   = `result-judge-badge ${meta.cls}`;
+
+  // [5번] 신뢰도
+  const rel   = getReliability(totalGapMs, DURATION_SEC);
+  const relBadge = document.getElementById('reliabilityBadge');
+  relBadge.textContent = rel.label;
+  relBadge.className   = `reliability-badge ${rel.cls}`;
+
+  // [5번] 신뢰도 낮음 경고 배너 (30% 초과)
+  if (rel.pct >= 30) {
+    document.getElementById('warnGapPct').textContent = rel.pct.toFixed(0);
+    document.getElementById('reliabilityWarning').classList.add('show');
+  }
+
+  // 통계 카드
+  document.getElementById('statMine').textContent = bpm;
+  document.getElementById('statMine').style.color = meta.color;
+
+  // [5번] 인식 공백 카드
+  const totalGapSec = totalGapMs / 1000;
+  const gapPct      = (totalGapMs / (DURATION_SEC * 1000) * 100).toFixed(0);
+  document.getElementById('statGap').textContent     = totalGapSec.toFixed(1);
+  document.getElementById('statGapUnit').textContent = `초 (${gapPct}%)`;
+
+  // 비교 바
+  const myPct  = Math.min(100, (bpm / BPM_MAX_DISPLAY) * 100);
+  const avgPct = Math.min(100, (17  / BPM_MAX_DISPLAY) * 100);
+
+  const normLeft  = (15 / BPM_MAX_DISPLAY) * 100;
+  const normWidth = (5  / BPM_MAX_DISPLAY) * 100;
+
+  ['normalZone','normalZone2'].forEach(id => {
+    const el = document.getElementById(id);
+    el.style.left  = normLeft  + '%';
+    el.style.width = normWidth + '%';
+  });
+
+  document.getElementById('barMyLabel').textContent = `${bpm} 회/분`;
+  document.getElementById('barMy').style.background = meta.color;
+
+  setTimeout(() => {
+    document.getElementById('barMy').style.width  = myPct  + '%';
+    document.getElementById('barAvg').style.width = avgPct + '%';
+  }, 300);
+
+  // 어드바이스
+  const advCard = document.getElementById('adviceCard');
+  advCard.className = `advice-card ${meta.advCls}`;
+  document.getElementById('adviceTitle').innerHTML = meta.advTitle;
+  document.getElementById('adviceBody').innerHTML  = meta.advBody;
+
+  if (state === 'danger' || state === 'low') {
+    const need  = Math.max(0, 15 - bpm).toFixed(1);
+    const addEl = document.createElement('p');
+    addEl.style.cssText = 'margin-top:14px;padding:10px 14px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:13px;color:var(--text-dim)';
+    addEl.innerHTML = `현재 <strong style="color:${meta.color}">${bpm}회/분</strong>에서 정상 범위 진입까지 ` +
+                      `<strong style="color:var(--ok)">+${need}회/분</strong> 증가가 필요합니다.`;
+    document.getElementById('adviceBody').appendChild(addEl);
+  }
+
+  // 팁 리스트
+  const tipList = document.getElementById('tipList');
+  tipList.innerHTML = `<div class="tip-list-title">눈 건강 실천 가이드</div>`;
+  tips.forEach(t => {
+    tipList.innerHTML += `
+      <div class="tip-item">
+        <div class="tip-icon">${t.icon}</div>
+        <div>
+          <div class="tip-content-title">${t.title}</div>
+          <div class="tip-content-desc">${t.desc}</div>
+        </div>
+      </div>`;
+  });
+
+  // 페이지 전환
+  document.getElementById('page1').classList.add('hidden');
+  const p2 = document.getElementById('page2');
+  p2.classList.remove('hidden-right');
+  p2.scrollTop = 0;
+}
+
+// ─── 뒤로가기 / 다시 측정 ───────────────────────────
+function goToPage1() {
+  document.getElementById('page2').classList.add('hidden-right');
+  document.getElementById('page1').classList.remove('hidden');
+
+  // 측정 상태 초기화
+  clearInterval(timerInterval);
+  if (gapStartTime !== null) gapStartTime = null;
+
+  isRunning     = false;
+  isDone        = false;
+  isCalibrating = false;
+  calibrated    = false;
+  blinkCount    = 0;
+  eyeClosedAt   = null;
+  secondsPassed = 0;
+  EAR_THRESH    = 0.21;
+  totalGapMs    = 0;
+  gapStartTime  = null;
+  resetEARBuffer();
+
+  // [1번] 선택한 시간 유지
+  DURATION_SEC = selectedDurationSec;
+  timeLeft     = selectedDurationSec;
+  timelineData = new Array(selectedDurationSec).fill(0);
+  timelineGap  = new Array(selectedDurationSec).fill(false);
+
+  // 결과 화면 상태 초기화 (다음 측정 시 오염 방지)
+  document.getElementById('heroNum').classList.remove('animate-in');
+  document.getElementById('reliabilityWarning').classList.remove('show');
+  document.getElementById('barMy').style.width  = '0%';
+  document.getElementById('barAvg').style.width = '0%';
+
+  calibOverlay.classList.remove('show');
+  distanceWarn.classList.remove('show');
+  timerDisp.textContent      = formatTime(selectedDurationSec);
+  timerDisp.classList.remove('done');
+  timerSub.textContent       = '시작 전';
+  blinkCountEl.textContent   = '0';
+  bpmValEl.textContent       = '—';
+  timelineWrap.style.display = 'none';
+  calibResult.classList.remove('show');
+  earThreshMark.style.left   = '35%';
+  gapLive.classList.remove('show');
+  gapLive.textContent        = '인식 공백: 0초';
+
+  lockTimeSelect(false);
+  startBtn.textContent = '측정 시작 (캘리브레이션)';
+  startBtn.disabled    = false;
+  resetBtn.disabled    = true;
+}
+
+document.getElementById('backBtn').addEventListener('click',       goToPage1);
+document.getElementById('remeasureBtn').addEventListener('click',  goToPage1);
+
+// ═══════════════════════════════════════════════════
+// [6번] 이미지 저장
+// ═══════════════════════════════════════════════════
+let html2canvasLoaded = false;
+let html2canvasLoadFailed = false;
+
+function loadHtml2Canvas() {
+  return new Promise((resolve, reject) => {
+    if (window.html2canvas) { html2canvasLoaded = true; resolve(); return; }
+    if (html2canvasLoadFailed)     { reject(new Error('already failed')); return; }
+
+    const script    = document.createElement('script');
+    script.src      = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.onload   = () => { html2canvasLoaded = true; resolve(); };
+    script.onerror  = () => { html2canvasLoadFailed = true; reject(new Error('load failed')); };
+    document.head.appendChild(script);
+  });
+}
+
+// 페이지 로드 시 html2canvas 미리 로드 시도
+loadHtml2Canvas().catch(() => {
+  // 로드 실패 시 저장 버튼 비활성화 + 안내
+  const saveBtn    = document.getElementById('saveBtn');
+  const saveUnavail = document.getElementById('saveUnavail');
+  if (saveBtn)     { saveBtn.style.display    = 'none'; }
+  if (saveUnavail) { saveUnavail.style.display = 'block'; }
+});
+
+async function saveResultImage() {
+  const saveBtn     = document.getElementById('saveBtn');
+  const saveBtnIcon = document.getElementById('saveBtnIcon');
+  const saveBtnText = document.getElementById('saveBtnText');
+
+  // 로드 재시도 (혹시 최초 로드가 아직 진행 중일 수 있으므로)
+  if (!html2canvasLoaded) {
+    try {
+      await loadHtml2Canvas();
+    } catch (e) {
+      saveBtnText.textContent = '저장 불가 (라이브러리 로드 실패)';
+      saveBtn.classList.add('fail');
+      return;
+    }
+  }
+
+  // 로딩 상태
+  saveBtn.disabled        = true;
+  saveBtn.classList.add('loading');
+  saveBtnIcon.textContent = '⏳';
+  saveBtnText.textContent = '저장 중...';
+
+  const page2El    = document.getElementById('page2');
+  const container  = document.getElementById('resultContainer');
+
+  // 스크롤 위치 저장 후 최상단으로 (전체 캡처를 위해)
+  const savedScroll = page2El.scrollTop;
+  page2El.scrollTop = 0;
+
+  // 애니메이션이 끝날 시간 확보 (짧은 딜레이)
+  await new Promise(r => setTimeout(r, 150));
+
+  try {
+    const scale  = Math.min(window.devicePixelRatio || 1, 2); // 최대 2배 cap
+    const canvas = await window.html2canvas(container, {
+      backgroundColor: '#0a0a0f',
+      useCORS:         true,
+      scale:           scale,
+      logging:         false,
+      width:           container.offsetWidth,
+      height:          container.scrollHeight,  // 스크롤 포함 전체 높이
+      scrollX:         0,
+      scrollY:         0,
+    });
+
+    const now      = new Date();
+    const dateStr  = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+    const filename = `blink-result-${dateStr}.png`;
+
+    // blob 방식 우선, 실패 시 dataURL fallback
+    if (typeof canvas.toBlob === 'function') {
+      canvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const a   = document.createElement('a');
+        a.href    = url;
+        a.download = filename;
+
+        // iOS Safari는 download attribute를 무시 → 새 탭으로 열기
+        if (typeof a.download === 'undefined' || navigator.userAgent.match(/iP(ad|hone|od)/)) {
+          window.open(url, '_blank');
+        } else {
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      }, 'image/png');
+    } else {
+      // toBlob 미지원 기기 fallback
+      const dataUrl = canvas.toDataURL('image/png');
+      const a       = document.createElement('a');
+      a.href        = dataUrl;
+      a.download    = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    // 성공
+    saveBtn.classList.remove('loading');
+    saveBtn.classList.add('success');
+    saveBtnIcon.textContent = '✓';
+    saveBtnText.textContent = '저장 완료!';
+
+    setTimeout(() => {
+      saveBtn.classList.remove('success');
+      saveBtnIcon.textContent = '⬇';
+      saveBtnText.textContent = '결과 이미지 저장';
+      saveBtn.disabled        = false;
+    }, 2500);
+
+  } catch (err) {
+    saveBtn.classList.remove('loading');
+    saveBtn.classList.add('fail');
+    saveBtnIcon.textContent = '✕';
+    saveBtnText.textContent = '저장 실패 — 다시 시도';
+
+    setTimeout(() => {
+      saveBtn.classList.remove('fail');
+      saveBtnIcon.textContent = '⬇';
+      saveBtnText.textContent = '결과 이미지 저장';
+      saveBtn.disabled        = false;
+    }, 2500);
+
+  } finally {
+    // 스크롤 위치 복원
+    page2El.scrollTop = savedScroll;
+  }
+}
+
+document.getElementById('saveBtn').addEventListener('click', saveResultImage);
+
+// ═══════════════════════════════════════════════════
+// MediaPipe 초기화
+// ═══════════════════════════════════════════════════
+
+// [2번] 해상도 fallback: 1280x720 → 640x480 → constraint 없음
+async function getCameraStream() {
+  const constraints = [
+    { video: { facingMode:'user', width:{ ideal:1280 }, height:{ ideal:720 } } },
+    { video: { facingMode:'user', width:640, height:480 } },
+    { video: { facingMode:'user' } },
+  ];
+
+  for (const c of constraints) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(c);
+    } catch (e) {
+      continue; // 다음 constraint 시도
+    }
+  }
+  throw new Error('사용 가능한 카메라가 없거나 권한이 거부되었습니다.');
+}
+
+async function init() {
+  let stream;
+  try {
+    stream = await getCameraStream();
+    videoEl.srcObject = stream;
+  } catch (e) {
+    loadingText.innerHTML =
+      `카메라 접근 실패<br><span style="font-size:10px;color:var(--warn)">${e.message}</span>`;
+    document.querySelector('.loader-ring').style.display = 'none';
+    return;
+  }
+
+  // 실제 얻은 해상도 확인
+  const track        = stream.getVideoTracks()[0];
+  const trackSettings = track ? track.getSettings() : {};
+  const camW         = trackSettings.width  || 640;
+  const camH         = trackSettings.height || 480;
+
+  const faceMesh = new FaceMesh({
+    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+  });
+
+  faceMesh.setOptions({
+    maxNumFaces:            1,
+    refineLandmarks:        true,   // [2번] refined landmarks 활성화
+    minDetectionConfidence: 0.45,   // [2번] 0.6 → 0.45 (원거리 감지 개선)
+    minTrackingConfidence:  0.45,   // [2번] 0.6 → 0.45
+  });
+
+  faceMesh.onResults(onResults);
+
+  const camera = new Camera(videoEl, {
+    onFrame: async () => { await faceMesh.send({ image: videoEl }); },
+    width:  camW,
+    height: camH,
+  });
+
+  camera.start().then(() => {
+    loadingOv.style.display      = 'none';
+    earBarWrap.style.display     = 'block';
+    statusDot.className          = 'status-dot active';
+    statusTextEl.textContent     = '얼굴 감지 대기';
+    startBtn.textContent         = '측정 시작 (캘리브레이션)';
+    startBtn.disabled            = false;
+  }).catch(err => {
+    loadingText.innerHTML =
+      `카메라 시작 실패<br><span style="font-size:10px;color:var(--warn)">${err.message}</span>`;
+  });
+}
+
+// 초기 상태 세팅
+applyDuration(selectedDurationSec);
+init();
+</script>
+</body>
+</html>
